@@ -1,0 +1,15 @@
+addr: 0.0.0.0:8080
+#addrtls: 0.0.0.0:8081
+#certfile: ./ssl-cert.pem
+#keyfile: ./ssl-cert.key
+username: admin
+password: admin
+compress: false
+paths:
+  # /c: "C:\\"
+  # /d: "D:\\"
+verbose: true
+logfile: ./simplehttpserver.log
+# HTTP_PROXY:
+# HTTPS_PROXY:
+# NO_PROXY: ::1,127.0.0.1,localhost
