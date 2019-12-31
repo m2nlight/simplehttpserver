@@ -26,6 +26,8 @@ const (
 	HTTPSProxy = "HTTPS_PROXY"
 	// NoProxy returns NO_PROXY
 	NoProxy = "NO_PROXY"
+	// MaxInt returns maxvalue for int
+	MaxInt = int((^uint(0)) >> 1)
 )
 
 var (
@@ -45,7 +47,7 @@ var (
 	fallback           = flag.String("fallback", "", "Fallback to some file. e.g.: If you serve a angular project, you can set it ./index.html")
 	enableColor        = flag.String("enablecolor", "", "Enable color output by http status code. e.g.: false")
 	enableUpload       = flag.String("enableupload", "", "Enable upload files")
-	maxRequestBodySize = flag.Int("maxrequestbodysize", 0, "Max request body size for upload big file")
+	maxRequestBodySize = flag.Int("maxrequestbodysize", MaxInt, "Max request body size for upload big file")
 	makeconfig         = flag.String("makeconfig", "", "Make a config file. e.g.: config.yaml")
 	config             = &Config{}
 	fsMap              = make(map[string]fasthttp.RequestHandler)
@@ -624,7 +626,7 @@ func makeConfigFile(configfile string) error {
 		return err
 	}
 	defer file.Close()
-	_, err = file.WriteString(
+	_, err = file.WriteString(fmt.Sprintf(
 		`addr: 0.0.0.0:8080
 #addrtls: 0.0.0.0:8081
 #certfile: ./ssl-cert.pem
@@ -642,11 +644,11 @@ verbose: true
 enablecolor: true
 enableupload: true
 ## maxrequestbodysize:0 to default size
-#maxrequestbodysize: 4294967296
+#maxrequestbodysize: %d
 #logfile: ./simplehttpserver.log
 #fallback: ./index.html
 #HTTP_PROXY:
 #HTTPS_PROXY:
-#NO_PROXY: ::1,127.0.0.1,localhost`)
+#NO_PROXY: ::1,127.0.0.1,localhost`, MaxInt))
 	return err
 }
