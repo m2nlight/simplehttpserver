@@ -19,7 +19,7 @@ import (
 
 const (
 	// Version information
-	Version = "SimpleHttpServer v1.2-beta.1"
+	Version = "SimpleHttpServer v1.3-beta.1"
 	// HTTPProxy returns HTTP_PROXY
 	HTTPProxy = "HTTP_PROXY"
 	// HTTPSProxy returns HTTPS_PROXY
@@ -29,46 +29,50 @@ const (
 )
 
 var (
-	version         = flag.Bool("version", false, "Output version only")
-	addr            = flag.String("addr", "", "TCP address to listen. e.g.:0.0.0.0:8080")
-	addrTLS         = flag.String("addrtls", "", "TCP address to listen to TLS (aka SSL or HTTPS) requests. Leave empty for disabling TLS")
-	certFile        = flag.String("certfile", "", "Path to TLS certificate file")
-	keyFile         = flag.String("keyfile", "", "Path to TLS key file")
-	compress        = flag.String("compress", "", "Whether to enable transparent response compression. e.g.: true")
-	username        = flag.String("username", "", "Username for basic authentication")
-	password        = flag.String("password", "", "Password for basic authentication")
-	path            = flag.String("path", "", "Local path to map to webroot. e.g.: ./")
-	indexNames      = flag.String("indexnames", "", "List of index file names. e.g.: index.html,index.htm")
-	configFile      = flag.String("config", "", "The config file path.")
-	verbose         = flag.String("verbose", "", "Print verbose log. e.g.: false")
-	logFile         = flag.String("logfile", "", "Output to logfile")
-	fallback        = flag.String("fallback", "", "Fallback to some file. e.g.: If you serve a angular project, you can set it ./index.html")
-	enableColor     = flag.String("enablecolor", "", "Enable color output by http status code. e.g.: false")
-	makeconfig      = flag.String("makeconfig", "", "Make a config file. e.g.: config.yaml")
-	config          = &Config{}
-	fsMap           = make(map[string]fasthttp.RequestHandler)
-	enableBasicAuth = false
-	logMutex        sync.Mutex
+	version            = flag.Bool("version", false, "Output version only")
+	addr               = flag.String("addr", "", "TCP address to listen. e.g.:0.0.0.0:8080")
+	addrTLS            = flag.String("addrtls", "", "TCP address to listen to TLS (aka SSL or HTTPS) requests. Leave empty for disabling TLS")
+	certFile           = flag.String("certfile", "", "Path to TLS certificate file")
+	keyFile            = flag.String("keyfile", "", "Path to TLS key file")
+	compress           = flag.String("compress", "", "Whether to enable transparent response compression. e.g.: true")
+	username           = flag.String("username", "", "Username for basic authentication")
+	password           = flag.String("password", "", "Password for basic authentication")
+	path               = flag.String("path", "", "Local path to map to webroot. e.g.: ./")
+	indexNames         = flag.String("indexnames", "", "List of index file names. e.g.: index.html,index.htm")
+	configFile         = flag.String("config", "", "The config file path.")
+	verbose            = flag.String("verbose", "", "Print verbose log. e.g.: false")
+	logFile            = flag.String("logfile", "", "Output to logfile")
+	fallback           = flag.String("fallback", "", "Fallback to some file. e.g.: If you serve a angular project, you can set it ./index.html")
+	enableColor        = flag.String("enablecolor", "", "Enable color output by http status code. e.g.: false")
+	enableUpload       = flag.String("enableupload", "", "Enable upload files")
+	maxRequestBodySize = flag.Int("maxrequestbodysize", 0, "Max request body size for upload big file")
+	makeconfig         = flag.String("makeconfig", "", "Make a config file. e.g.: config.yaml")
+	config             = &Config{}
+	fsMap              = make(map[string]fasthttp.RequestHandler)
+	enableBasicAuth    = false
+	logMutex           sync.Mutex
 )
 
 // Config from config.yaml
 type Config struct {
-	Addr        string
-	AddrTLS     string
-	CertFile    string
-	KeyFile     string
-	Username    string
-	Password    string
-	Compress    bool
-	Paths       map[string]string
-	IndexNames  []string
-	Verbose     bool
-	LogFile     string
-	Fallback    string
-	EnableColor bool
-	HTTPProxy   string `yaml:"HTTP_PROXY,omitempty"`
-	HTTPSProxy  string `yaml:"HTTPS_PROXY,omitempty"`
-	NoProxy     string `yaml:"NO_PROXY,omitempty"`
+	Addr               string
+	AddrTLS            string
+	CertFile           string
+	KeyFile            string
+	Username           string
+	Password           string
+	Compress           bool
+	Paths              map[string]string
+	IndexNames         []string
+	Verbose            bool
+	LogFile            string
+	Fallback           string
+	EnableColor        bool
+	EnableUpload       bool
+	MaxRequestBodySize int
+	HTTPProxy          string `yaml:"HTTP_PROXY,omitempty"`
+	HTTPSProxy         string `yaml:"HTTPS_PROXY,omitempty"`
+	NoProxy            string `yaml:"NO_PROXY,omitempty"`
 }
 
 func main() {
@@ -173,6 +177,29 @@ func main() {
 	default:
 		log.Fatalf("error: %v", fmt.Errorf("argument enablecolor error"))
 	}
+	switch strings.ToLower(*enableUpload) {
+	case "":
+		fallthrough
+	case "true":
+		config.EnableUpload = true
+	case "false":
+		config.EnableUpload = false
+	default:
+		log.Fatalf("error: %v", fmt.Errorf("argument enableupload error"))
+	}
+	if *maxRequestBodySize > 0 {
+		config.MaxRequestBodySize = *maxRequestBodySize
+	} else {
+		config.MaxRequestBodySize = fasthttp.DefaultMaxRequestBodySize
+	}
+
+	// safe warning
+	if len(config.AddrTLS) == 0 || !enableBasicAuth {
+		color.Set(color.FgRed)
+		log.Println("NOT SAFE WARNING: PLEASE TURN ON TLS AND BASIC AUTHORIZATION")
+		color.Unset()
+	}
+
 	// config proxy
 	if len(config.HTTPProxy) > 0 {
 		_ = os.Setenv(HTTPProxy, config.HTTPProxy)
@@ -199,7 +226,8 @@ func main() {
 	if len(config.Addr) > 0 {
 		log.Println("Server address:", config.Addr)
 		go func() {
-			if err := fasthttp.ListenAndServe(config.Addr, h); err != nil {
+			server := &fasthttp.Server{Handler: h, MaxRequestBodySize: config.MaxRequestBodySize}
+			if err := server.ListenAndServe(config.Addr); err != nil {
 				log.Fatalf("error in ListenAndServe: %s", err)
 			}
 		}()
@@ -209,7 +237,8 @@ func main() {
 		log.Println("CertFile:", config.CertFile)
 		log.Println("KeyFile:", config.KeyFile)
 		go func() {
-			if err := fasthttp.ListenAndServeTLS(config.AddrTLS, config.CertFile, config.KeyFile, h); err != nil {
+			server := &fasthttp.Server{Handler: h, MaxRequestBodySize: config.MaxRequestBodySize}
+			if err := server.ListenAndServeTLS(config.AddrTLS, config.CertFile, config.KeyFile); err != nil {
 				log.Fatalf("error in ListenAndServeTLS: %s", err)
 			}
 		}()
@@ -220,6 +249,8 @@ func main() {
 		log.Println("Fallback:", config.Fallback)
 	}
 	log.Println("EnableColor:", config.EnableColor)
+	log.Println("EnableUpload:", config.EnableUpload)
+	log.Println("MaxRequestBodySize:", config.MaxRequestBodySize)
 	indexNamesLen := len(config.IndexNames)
 	if indexNamesLen > 0 {
 		log.Printf("Have %d index name(s):\n", indexNamesLen)
@@ -229,6 +260,7 @@ func main() {
 	} else {
 		log.Println("No any index names")
 	}
+
 	// map paths
 	if len(config.Paths) == 0 {
 		config.Paths["/"] = "."
@@ -248,7 +280,7 @@ func main() {
 		fs := &fasthttp.FS{
 			Root:               v,
 			IndexNames:         config.IndexNames,
-			GenerateIndexPages: true,
+			GenerateIndexPages: false,
 			AcceptByteRange:    true,
 		}
 		if len(config.Fallback) > 0 {
@@ -315,6 +347,8 @@ func requestHandler(ctx *fasthttp.RequestCtx) {
 				fmt.Fprintf(ctx, `{"message":"pong","time":"`+ctx.Time().String()+`"}`)
 				ctx.SetContentType("application/json; charset=utf8")
 			}
+		case "/upload":
+			uploadHandle(ctx)
 		default:
 			ctx.Error(fasthttp.StatusMessage(fasthttp.StatusBadRequest), fasthttp.StatusBadRequest)
 		}
@@ -334,7 +368,7 @@ func requestHandler(ctx *fasthttp.RequestCtx) {
 func fsHandler(ctx *fasthttp.RequestCtx) {
 	path := string(ctx.Path())
 	if path == "/" && len(fsMap) > 1 {
-		fmt.Fprintf(ctx, "<html><head><title>root</title></head><body><h1>root</h1><ul>")
+		fmt.Fprintf(ctx, "<html><head></head><body><h1>Root</h1><ul>")
 		for k, v := range config.Paths {
 			if !strings.HasPrefix(k, "/") || k == "/" {
 				continue
@@ -348,6 +382,9 @@ func fsHandler(ctx *fasthttp.RequestCtx) {
 
 	for k, handler := range fsMap {
 		if strings.HasPrefix(path, k) {
+			if dirHandler(path, ctx) {
+				return
+			}
 			handler(ctx)
 			mimeType := staticFileGetMimeType(filepath.Ext(path))
 			if len(mimeType) > 0 {
@@ -358,6 +395,126 @@ func fsHandler(ctx *fasthttp.RequestCtx) {
 	}
 
 	ctx.Error(fasthttp.StatusMessage(fasthttp.StatusNotFound), fasthttp.StatusNotFound)
+}
+
+func dirHandler(path string, ctx *fasthttp.RequestCtx) bool {
+	localpath := ""
+	for k, v := range config.Paths {
+		if strings.HasPrefix(path, k) {
+			localpath = filepath.Join(v, path[len(k):])
+			break
+		}
+	}
+	if len(localpath) == 0 {
+		return false
+	}
+	// if localpath is a directory
+	dir, err := os.Stat(localpath)
+	if err == nil && dir.IsDir() {
+		for _, v := range config.IndexNames {
+			indexfile := filepath.Join(localpath, v)
+			if fi, err := os.Stat(indexfile); err == nil {
+				if !fi.IsDir() {
+					ctx.SendFile(indexfile)
+					return true
+				}
+			}
+		}
+
+		if ff, err := ioutil.ReadDir(localpath); err == nil {
+			path = strings.TrimRight(path, "/")
+			title := path[strings.LastIndex(path, "/")+1:]
+			parentLink := ""
+			if len(path) > 0 {
+				idx := strings.LastIndex(path, title)
+				var link string
+				if idx > 0 {
+					link = path[:idx]
+				} else {
+					link = "/"
+				}
+				parentLink = "<a href=\"" + link + "\"><b>..</b></a>"
+			}
+			if len(title) == 0 {
+				title = "Root"
+			}
+
+			var uploadhtml string
+			if config.EnableUpload {
+				uploadhtml = fmt.Sprintf(`<form enctype="multipart/form-data" action="/upload" method="post">`+
+					`<input name="files[]" type="file" multiple>`+
+					`<input type="submit" value="Upload" onclick="this.disabled=true;this.value='Sending...';"/>`+
+					`<input type="hidden" id="r" name="r" value="%s">`+
+					`<input type="hidden" id="p" name="p" value="%s"></form>`,
+					ctx.RequestURI(), localpath)
+			} else {
+				uploadhtml = ""
+			}
+
+			fmt.Fprintf(ctx, "<html><head><style>table{width:100%%;} th,td{text-align:left;padding-right:10px;} .size{text-align:right;} a{text-decoration:none} tr:hover{background-color:#ffff99;}</style>"+
+				"</head><body><h1>%s</h1>%s<p>%d item(s)</p><table>"+
+				"<tr><th>Name</th><th>Type</th><th>Mode</th><th class=\"size\">Size</th><th>Modified</th></tr>"+
+				"<tr><td>%s</td></tr>", title, uploadhtml, len(ff), parentLink)
+			for _, f := range ff {
+				filename := f.Name()
+				link := path + "/" + filename
+				if f.IsDir() {
+					fmt.Fprintf(ctx, "<tr><td><a href=\"%s\"><b>%s</b></a></td><td>dir</td><td>%s</td><td class=\"size\"</td><td>%s</td>",
+						link, filename, f.Mode().String(), f.ModTime())
+				} else {
+					fmt.Fprintf(ctx, "<tr><td><a href=\"%s\">%s</a></td><td>file</td><td>%s</td><td class=\"size\">%d</td><td>%s</td>",
+						link, filename, f.Mode().String(), f.Size(), f.ModTime())
+				}
+			}
+			fmt.Fprintf(ctx, "</table></body></html>")
+			ctx.SetContentType("text/html; charset=utf8")
+			return true
+		}
+	}
+
+	if err != nil {
+		ctx.Error(err.Error(), fasthttp.StatusOK)
+	}
+	return false
+}
+
+func uploadHandle(ctx *fasthttp.RequestCtx) {
+	form, err := ctx.MultipartForm()
+	if err != nil {
+		ctx.Error(err.Error(), fasthttp.StatusInternalServerError)
+		return
+	}
+
+	var uri, path string
+	if r, ok := form.Value["r"]; ok && len(r) == 1 {
+		uri = r[0]
+	}
+	if len(uri) == 0 {
+		ctx.Error(err.Error(), fasthttp.StatusInternalServerError)
+		return
+	}
+	if p, ok := form.Value["p"]; ok && len(p) == 1 {
+		path = p[0]
+	}
+	if len(path) == 0 {
+		ctx.Error(err.Error(), fasthttp.StatusInternalServerError)
+		return
+	}
+
+	for _, v := range form.File {
+		for _, header := range v {
+			fn := filepath.Join(path, header.Filename)
+			fasthttp.SaveMultipartFile(header, fn)
+		}
+	}
+	ctx.Redirect(uri, fasthttp.StatusOK)
+}
+
+func dirIsExist(path string) bool {
+	if fi, err := os.Stat(path); err == nil {
+		return fi.IsDir()
+	}
+	return false
 }
 
 func basicAuth(ctx *fasthttp.RequestCtx) (username, password string, ok bool) {
@@ -476,13 +633,16 @@ func makeConfigFile(configfile string) error {
 #password: admin
 compress: false
 paths:
-  # /c: "C:\\"
-  # /d: "D:\\"
+  #/c: "C:\\"
+  #/d: "D:\\"
 indexnames:
   - index.html
   - index.htm
 verbose: true
 enablecolor: true
+enableupload: true
+## maxrequestbodysize:0 to default size
+#maxrequestbodysize: 4294967296
 #logfile: ./simplehttpserver.log
 #fallback: ./index.html
 #HTTP_PROXY:

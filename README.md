@@ -11,6 +11,7 @@ A simple static file http server
 - Supports basic authorize
 - Supports compress
 - Supports log file and colorful output
+- Supports upload files
 
 ## Run
 
@@ -72,13 +73,16 @@ Browse <https://localhost:8081>
     #password: admin
     compress: false
     paths:
-    # /c: "C:\\"
-    # /d: "D:\\"
+      #/c: "C:\\"
+      #/d: "D:\\"
     indexnames:
-    - index.html
-    - index.htm
+      - index.html
+      - index.htm
     verbose: true
     enablecolor: true
+    enableupload: true
+    ## maxrequestbodysize:0 to default size
+    #maxrequestbodysize: 4294967296
     #logfile: ./simplehttpserver.log
     #fallback: ./index.html
     #HTTP_PROXY:
