@@ -12,17 +12,21 @@ GOOS_GOARCH_array=( aix_ppc64 android_386 android_amd64 android_arm android_arm6
 appname=`\basename $(\pwd)`
 outputpath=./bin
 package=''
+declare -i verbose=0
 
 until [ $# -eq 0 ]; do
 	case "$1" in
 	--help|-h)
-		echo "usage: bash ${0##*/} [--package|-p <package-name>] [--name|-n <app-name>] [--output|-o <output-path>]"
+		printf "usage: bash ${0##*/} [--verbose|-v] [--package|-p <package-name>] [--name|-n <app-name>] [--output|-o <output-path>]\n"
 		exit 0
 		;;
+  --verbose|-v)
+    verbose=1
+    ;;
 	--package|-n)
 		shift
 		if [ -z "$1" ] || [[ "$1" =~ ^\- ]]; then
-			echo "ERROR: package argument error: $1"
+			printf "ERROR: package argument error: $1\n"
 			exit 1
 		fi
 		package=$1
@@ -30,7 +34,7 @@ until [ $# -eq 0 ]; do
 	--name|-n)
 		shift
 		if [ -z "$1" ] || [[ "$1" =~ ^\- ]]; then
-			echo "ERROR: name argument error: $1"
+			printf "ERROR: name argument error: $1\n"
 			exit 1
 		fi
 		appname=$1
@@ -38,13 +42,13 @@ until [ $# -eq 0 ]; do
 	--output|-o)
 		shift
 		if [ -z "$1" ] || [[ "$1" =~ ^\- ]]; then
-			echo "ERROR: output argument error: $1"
+			printf "ERROR: output argument error: $1\n"
 			exit 1
 		fi
 		outputpath=$1
 		;;
 	*)
-		echo "ERROR: arguments error. please run \"bash ${0##*/} --help\" to get usage"
+		printf "ERROR: arguments error. please run \"bash ${0##*/} --help\" to get usage\n"
 		exit 1
 		;;
 	esac
@@ -52,18 +56,18 @@ until [ $# -eq 0 ]; do
 done
 
 if [ -z "$appname" ]; then
-	echo "ERROR: please input an app-name by --name"
+	printf "ERROR: please input an app-name by --name\n"
 	exit 2
 fi
 
 if [ -z "$outputpath" ]; then
-	echo "ERROR: please input an output-path by --output"
+	printf "ERROR: please input an output-path by --output\n"
 	exit 2
 fi
 
-mkdir -p $outputpath
+mkdir -p "$outputpath"
 if [ $? -ne 0 ]; then
-	echo "ERROR: creating $outputpath failed: $?"
+	printf "ERROR: create $outputpath failed: $?\n"
 	exit 2
 fi
 
@@ -71,18 +75,44 @@ cat << EOF
 Package: $package
 AppName: $appname
 Output: $outputpath
-
 EOF
 
+if [ ! -f go.mod ]; then
+  printf "\nCreating go.mod ...\n"
+  go mod init $appname
+  if [ $? -ne 0 ]; then
+    printf "Error: $?\n"
+    exit 2
+  fi
+fi
+
 declare -i count=${#GOOS_GOARCH_array[*]}
-declare -i num=1
+declare -i num=0
 for target in "${GOOS_GOARCH_array[@]}"; do
-	output=$outputpath/${appname}_${target}
-	if [ "${target%%_*}"="windows" ]; then
-		output="$output.exe"
-	fi
-	echo "($num/$count) building $output ..."
-	env GOOS=${target%%_*} GOARCH=${target##*_} go build -o $output $package
-	file $output
 	let num+=1
+	output=$outputpath/${appname}_${target}
+  mygoos=${target%%_*}
+  mygoarch=${target##*_}
+  myverbose=''
+  mycgo=''
+  if [ $verbose -eq 1 ]; then
+    myverbose='-v'
+  fi
+  case "$mygoos" in
+    windows)
+		  output="$output.exe"
+      ;;
+    android)
+      mycgo='CGO_ENABLED=1'
+      ;;
+  esac
+	printf "\n($num/$count) Building $output ...\n"
+	env GOOS=$mygoos GOARCH=$mygoarch `printf "$mycgo"` go build $myverbose -ldflags "-s -w" -o $output $package
+	file $output
 done
+
+if [ -t 1 ]; then
+	printf "\nDone. Press any key to exit..."
+	read -n1
+	printf "\n"
+fi

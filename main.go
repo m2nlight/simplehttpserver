@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/fatih/color"
 	"github.com/valyala/fasthttp"
@@ -19,7 +20,7 @@ import (
 
 const (
 	// Version information
-	Version = "SimpleHttpServer v1.3-beta.1"
+	Version = "SimpleHttpServer v1.3-beta.2"
 	// HTTPProxy returns HTTP_PROXY
 	HTTPProxy = "HTTP_PROXY"
 	// HTTPSProxy returns HTTPS_PROXY
@@ -289,6 +290,10 @@ func main() {
 			fs.PathNotFound = func(ctx *fasthttp.RequestCtx) {
 				fallbackpath := filepath.Join(v, config.Fallback)
 				if _, err := os.Stat(fallbackpath); err == nil {
+					mimeType := staticFileGetMimeType(filepath.Ext(fallbackpath))
+					if len(mimeType) > 0 {
+						ctx.SetContentType(mimeType)
+					}
 					ctx.SendFile(fallbackpath)
 				} else {
 					ctx.Error(fasthttp.StatusMessage(fasthttp.StatusNotFound), fasthttp.StatusNotFound)
@@ -341,6 +346,11 @@ func requestHandler(ctx *fasthttp.RequestCtx) {
 	}
 
 	// router
+	// log print
+	if config.Verbose {
+		statusCode := ctx.Response.StatusCode()
+		go logInfo(statusCode, "%d | %s | %s | %s\n", statusCode, ctx.RemoteIP(), ctx.Method(), ctx.Path())
+	}
 	switch string(ctx.Method()) {
 	case "POST":
 		switch string(ctx.Path()) {
@@ -358,12 +368,6 @@ func requestHandler(ctx *fasthttp.RequestCtx) {
 		fsHandler(ctx)
 	default:
 		ctx.Error(fasthttp.StatusMessage(fasthttp.StatusNotFound), fasthttp.StatusNotFound)
-	}
-
-	// log print
-	if config.Verbose {
-		statusCode := ctx.Response.StatusCode()
-		go logInfo(statusCode, "%d | %s | %s | %s\n", statusCode, ctx.RemoteIP(), ctx.Method(), ctx.Path())
 	}
 }
 
@@ -417,6 +421,10 @@ func dirHandler(path string, ctx *fasthttp.RequestCtx) bool {
 			indexfile := filepath.Join(localpath, v)
 			if fi, err := os.Stat(indexfile); err == nil {
 				if !fi.IsDir() {
+					mimeType := staticFileGetMimeType(filepath.Ext(indexfile))
+					if len(mimeType) > 0 {
+						ctx.SetContentType(mimeType)
+					}
 					ctx.SendFile(indexfile)
 					return true
 				}
@@ -446,6 +454,7 @@ func dirHandler(path string, ctx *fasthttp.RequestCtx) bool {
 				uploadhtml = fmt.Sprintf(`<form enctype="multipart/form-data" action="/upload" method="post">`+
 					`<input name="files[]" type="file" multiple>`+
 					`<input type="submit" value="Upload" onclick="this.disabled=true;this.value='Sending...';"/>`+
+					`<input type="checkbox" name="o" value="true">Overwrite`+
 					`<input type="hidden" id="r" name="r" value="%s">`+
 					`<input type="hidden" id="p" name="p" value="%s"></form>`,
 					ctx.RequestURI(), localpath)
@@ -488,6 +497,7 @@ func uploadHandle(ctx *fasthttp.RequestCtx) {
 	}
 
 	var uri, path string
+	isOverwrite := false
 	if r, ok := form.Value["r"]; ok && len(r) == 1 {
 		uri = r[0]
 	}
@@ -502,11 +512,36 @@ func uploadHandle(ctx *fasthttp.RequestCtx) {
 		ctx.Error(err.Error(), fasthttp.StatusInternalServerError)
 		return
 	}
+	if o, ok := form.Value["o"]; ok && len(o) == 1 {
+		isOverwrite = o[0] == "true"
+	}
 
 	for _, v := range form.File {
 		for _, header := range v {
 			fn := filepath.Join(path, header.Filename)
-			fasthttp.SaveMultipartFile(header, fn)
+			if !isOverwrite && fileOrDirIsExist(fn) {
+				for index := 1; index <= MaxInt; index++ {
+					ext := filepath.Ext(fn)
+					newfn := fmt.Sprintf("%s_%s_%d%s",
+						strings.TrimSuffix(fn, ext),
+						time.Now().Format("20060102150405"),
+						index,
+						ext)
+					if !fileOrDirIsExist(newfn) {
+						fn = newfn
+						break
+					}
+					if index == MaxInt {
+						ctx.Error("Sorry, can not create unique filename for "+fn, fasthttp.StatusInternalServerError)
+						return
+					}
+				}
+			}
+			logInfo(0, "%s | Saving file %s", ctx.RemoteIP(), fn)
+			err := fasthttp.SaveMultipartFile(header, fn)
+			if err != nil {
+				logInfo(fasthttp.StatusInternalServerError, "Save %s failed: %s", fn, err.Error())
+			}
 		}
 	}
 	ctx.Redirect(uri, fasthttp.StatusOK)
@@ -515,6 +550,13 @@ func uploadHandle(ctx *fasthttp.RequestCtx) {
 func dirIsExist(path string) bool {
 	if fi, err := os.Stat(path); err == nil {
 		return fi.IsDir()
+	}
+	return false
+}
+
+func fileOrDirIsExist(path string) bool {
+	if _, err := os.Stat(path); err == nil {
+		return true
 	}
 	return false
 }
