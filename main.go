@@ -20,7 +20,7 @@ import (
 
 const (
 	// Version information
-	Version = "SimpleHttpServer v1.3-beta.2"
+	Version = "SimpleHttpServer v1.3-beta.3"
 	// HTTPProxy returns HTTP_PROXY
 	HTTPProxy = "HTTP_PROXY"
 	// HTTPSProxy returns HTTPS_PROXY
@@ -289,26 +289,26 @@ func main() {
 		if len(config.Fallback) > 0 {
 			fs.PathNotFound = func(ctx *fasthttp.RequestCtx) {
 				fallbackpath := filepath.Join(v, config.Fallback)
-				if _, err := os.Stat(fallbackpath); err == nil {
+				if fileIsExist(fallbackpath) {
 					mimeType := staticFileGetMimeType(filepath.Ext(fallbackpath))
 					if len(mimeType) > 0 {
 						ctx.SetContentType(mimeType)
 					}
 					ctx.SendFile(fallbackpath)
 				} else {
-					ctx.Error(fasthttp.StatusMessage(fasthttp.StatusNotFound), fasthttp.StatusNotFound)
+					statusCode := fasthttp.StatusNotFound
+					ctx.Error(fasthttp.StatusMessage(statusCode), statusCode)
 					if config.Verbose {
-						statusCode := ctx.Response.StatusCode()
 						go logInfo(statusCode, "%d | %s | %s | %s\n", statusCode, ctx.RemoteIP(), ctx.Method(), ctx.Path())
 					}
 				}
 			}
 		}
+
 		if k != "/" {
 			fs.PathRewrite = fasthttp.NewPathPrefixStripper(len(k))
 		}
 		fsMap[k] = fs.NewRequestHandler()
-		// print map paths
 		log.Printf("%s -> %s\n", k, v)
 	}
 	if len(fsMap) > 1 {
@@ -333,11 +333,11 @@ func requestHandler(ctx *fasthttp.RequestCtx) {
 	if enableBasicAuth {
 		user, pwd, ok := basicAuth(ctx)
 		if !ok || user != config.Username || pwd != config.Password {
-			ctx.Error(fasthttp.StatusMessage(fasthttp.StatusUnauthorized), fasthttp.StatusUnauthorized)
+			statusCode := fasthttp.StatusUnauthorized
+			ctx.Error(fasthttp.StatusMessage(statusCode), statusCode)
 			ctx.Response.Header.Set("WWW-Authenticate", "Basic realm=Restricted")
 			// log print
 			if config.Verbose {
-				statusCode := ctx.Response.StatusCode()
 				go logInfo(statusCode, "%d | %s | %s | %s | %s | %s \n",
 					statusCode, ctx.RemoteIP(), ctx.Method(), ctx.Path(), user, pwd)
 			}
@@ -346,11 +346,6 @@ func requestHandler(ctx *fasthttp.RequestCtx) {
 	}
 
 	// router
-	// log print
-	if config.Verbose {
-		statusCode := ctx.Response.StatusCode()
-		go logInfo(statusCode, "%d | %s | %s | %s\n", statusCode, ctx.RemoteIP(), ctx.Method(), ctx.Path())
-	}
 	switch string(ctx.Method()) {
 	case "POST":
 		switch string(ctx.Path()) {
@@ -362,12 +357,20 @@ func requestHandler(ctx *fasthttp.RequestCtx) {
 		case "/upload":
 			uploadHandle(ctx)
 		default:
-			ctx.Error(fasthttp.StatusMessage(fasthttp.StatusBadRequest), fasthttp.StatusBadRequest)
+			statusCode := fasthttp.StatusBadRequest
+			ctx.Error(fasthttp.StatusMessage(statusCode), statusCode)
 		}
 	case "GET":
 		fsHandler(ctx)
 	default:
-		ctx.Error(fasthttp.StatusMessage(fasthttp.StatusNotFound), fasthttp.StatusNotFound)
+		statusCode := fasthttp.StatusNotFound
+		ctx.Error(fasthttp.StatusMessage(statusCode), statusCode)
+	}
+
+	// log print
+	if config.Verbose {
+		statusCode := ctx.Response.StatusCode()
+		go logInfo(statusCode, "%d | %s | %s | %s\n", statusCode, ctx.RemoteIP(), ctx.Method(), ctx.Path())
 	}
 }
 
@@ -388,13 +391,16 @@ func fsHandler(ctx *fasthttp.RequestCtx) {
 
 	for k, handler := range fsMap {
 		if strings.HasPrefix(path, k) {
-			if dirHandler(path, ctx) {
+			isDir, ok := dirHandler(path, ctx)
+			if ok {
 				return
 			}
-			handler(ctx)
-			mimeType := staticFileGetMimeType(filepath.Ext(path))
-			if len(mimeType) > 0 {
-				ctx.SetContentType(mimeType)
+			if !isDir {
+				handler(ctx)
+				mimeType := staticFileGetMimeType(filepath.Ext(path))
+				if len(mimeType) > 0 {
+					ctx.SetContentType(mimeType)
+				}
 			}
 			return
 		}
@@ -403,8 +409,8 @@ func fsHandler(ctx *fasthttp.RequestCtx) {
 	ctx.Error(fasthttp.StatusMessage(fasthttp.StatusNotFound), fasthttp.StatusNotFound)
 }
 
-func dirHandler(path string, ctx *fasthttp.RequestCtx) bool {
-	localpath := ""
+func dirHandler(path string, ctx *fasthttp.RequestCtx) (isDir bool, ok bool) {
+	var localpath string
 	for k, v := range config.Paths {
 		if strings.HasPrefix(path, k) {
 			localpath = filepath.Join(v, path[len(k):])
@@ -412,22 +418,22 @@ func dirHandler(path string, ctx *fasthttp.RequestCtx) bool {
 		}
 	}
 	if len(localpath) == 0 {
-		return false
+		return
 	}
-	// if localpath is a directory
-	dir, err := os.Stat(localpath)
-	if err == nil && dir.IsDir() {
+
+	var err error
+	if dirIsExist(localpath) {
+		isDir = true
 		for _, v := range config.IndexNames {
 			indexfile := filepath.Join(localpath, v)
-			if fi, err := os.Stat(indexfile); err == nil {
-				if !fi.IsDir() {
-					mimeType := staticFileGetMimeType(filepath.Ext(indexfile))
-					if len(mimeType) > 0 {
-						ctx.SetContentType(mimeType)
-					}
-					ctx.SendFile(indexfile)
-					return true
+			if fileIsExist(indexfile) {
+				mimeType := staticFileGetMimeType(filepath.Ext(indexfile))
+				if len(mimeType) > 0 {
+					ctx.SetContentType(mimeType)
 				}
+				ctx.SendFile(indexfile)
+				ok = true
+				return
 			}
 		}
 
@@ -479,14 +485,15 @@ func dirHandler(path string, ctx *fasthttp.RequestCtx) bool {
 			}
 			fmt.Fprintf(ctx, "</table></body></html>")
 			ctx.SetContentType("text/html; charset=utf8")
-			return true
+			ok = true
+			return
 		}
 	}
 
 	if err != nil {
-		ctx.Error(err.Error(), fasthttp.StatusOK)
+		ctx.Error(err.Error(), fasthttp.StatusInternalServerError)
 	}
-	return false
+	return
 }
 
 func uploadHandle(ctx *fasthttp.RequestCtx) {
@@ -550,6 +557,13 @@ func uploadHandle(ctx *fasthttp.RequestCtx) {
 func dirIsExist(path string) bool {
 	if fi, err := os.Stat(path); err == nil {
 		return fi.IsDir()
+	}
+	return false
+}
+
+func fileIsExist(path string) bool {
+	if fi, err := os.Stat(path); err == nil {
+		return !fi.IsDir()
 	}
 	return false
 }
