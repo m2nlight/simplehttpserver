@@ -20,7 +20,7 @@ import (
 
 const (
 	// Version information
-	Version = "SimpleHttpServer v1.3-beta.3"
+	Version = "SimpleHttpServer v1.3-beta.4"
 	// HTTPProxy returns HTTP_PROXY
 	HTTPProxy = "HTTP_PROXY"
 	// HTTPSProxy returns HTTPS_PROXY
@@ -700,8 +700,8 @@ verbose: true
 enablecolor: true
 enableupload: true
 ## maxrequestbodysize:0 to default size
-#maxrequestbodysize: %d
-#logfile: ./simplehttpserver.log
+maxrequestbodysize: %d
+logfile: ./simplehttpserver.log
 #fallback: ./index.html
 #HTTP_PROXY:
 #HTTPS_PROXY:
