@@ -21,7 +21,7 @@ import (
 
 const (
 	// Version information
-	Version = "SimpleHttpServer v1.3-beta.4"
+	Version = "SimpleHttpServer v1.3-beta.5"
 	// HTTPProxy returns HTTP_PROXY
 	HTTPProxy = "HTTP_PROXY"
 	// HTTPSProxy returns HTTPS_PROXY
@@ -50,8 +50,8 @@ var (
 	enableColor        = flag.String("enablecolor", "", "Enable color output by http status code. e.g.: false")
 	enableUpload       = flag.String("enableupload", "", "Enable upload files")
 	maxRequestBodySize = flag.String("maxrequestbodysize", "", "Max request body size for upload big file")
-	readTimeout        = flag.String("readtimeout", "", "Limit read timeout (unit: ns), 0 for unlimited")
-	writeTimeout       = flag.String("writetimeout", "", "Limit write timeout (unit: ns), 0 for unlimited")
+	readTimeout        = flag.String("readtimeout", "", "Limit read timeout, 0s for unlimited")
+	writeTimeout       = flag.String("writetimeout", "", "Limit write timeout, 0s for unlimited")
 	makeconfig         = flag.String("makeconfig", "", "Make a config file. e.g.: config.yaml")
 	config             = &Config{}
 	fsMap              = make(map[string]fasthttp.RequestHandler)
@@ -202,19 +202,24 @@ func main() {
 		}
 		config.MaxRequestBodySize = i
 	}
+	if config.MaxRequestBodySize < 0 {
+		log.Fatalf("error: %v", fmt.Errorf("MaxRequestBodySize must be large or equal 0"))
+	} else if config.MaxRequestBodySize == 0 {
+		config.MaxRequestBodySize = fasthttp.DefaultMaxRequestBodySize
+	}
 	if len(*readTimeout) > 0 {
-		i, err := strconv.ParseInt(*readTimeout, 10, 64)
-		if err != nil || i < 0 {
+		i, err := time.ParseDuration(*readTimeout)
+		if err != nil {
 			log.Fatalf("error: %v", fmt.Errorf("argument readtimeout error"))
 		}
-		config.ReadTimeout = time.Duration(i)
+		config.ReadTimeout = i
 	}
 	if len(*writeTimeout) > 0 {
-		i, err := strconv.ParseInt(*writeTimeout, 10, 64)
-		if err != nil || i < 0 {
+		i, err := time.ParseDuration(*writeTimeout)
+		if err != nil {
 			log.Fatalf("error: %v", fmt.Errorf("argument writetimeout error"))
 		}
-		config.WriteTimeout = time.Duration(i)
+		config.WriteTimeout = i
 	}
 
 	// safe warning
@@ -734,7 +739,7 @@ enablecolor: true
 enableupload: true
 ## maxrequestbodysize 0 to default size
 maxrequestbodysize: %d
-## timeout 0s is no limit
+## timeout 0s is unlimited
 readtimeout: 0s
 writetimeout: 0s
 logfile: ./simplehttpserver.log
