@@ -9,6 +9,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -48,7 +49,9 @@ var (
 	fallback           = flag.String("fallback", "", "Fallback to some file. e.g.: If you serve a angular project, you can set it ./index.html")
 	enableColor        = flag.String("enablecolor", "", "Enable color output by http status code. e.g.: false")
 	enableUpload       = flag.String("enableupload", "", "Enable upload files")
-	maxRequestBodySize = flag.Int("maxrequestbodysize", MaxInt, "Max request body size for upload big file")
+	maxRequestBodySize = flag.String("maxrequestbodysize", "", "Max request body size for upload big file")
+	readTimeout        = flag.String("readtimeout", "", "Limit read timeout (unit: ns), 0 for unlimited")
+	writeTimeout       = flag.String("writetimeout", "", "Limit write timeout (unit: ns), 0 for unlimited")
 	makeconfig         = flag.String("makeconfig", "", "Make a config file. e.g.: config.yaml")
 	config             = &Config{}
 	fsMap              = make(map[string]fasthttp.RequestHandler)
@@ -73,6 +76,8 @@ type Config struct {
 	EnableColor        bool
 	EnableUpload       bool
 	MaxRequestBodySize int
+	ReadTimeout        time.Duration
+	WriteTimeout       time.Duration
 	HTTPProxy          string `yaml:"HTTP_PROXY,omitempty"`
 	HTTPSProxy         string `yaml:"HTTPS_PROXY,omitempty"`
 	NoProxy            string `yaml:"NO_PROXY,omitempty"`
@@ -190,10 +195,26 @@ func main() {
 	default:
 		log.Fatalf("error: %v", fmt.Errorf("argument enableupload error"))
 	}
-	if *maxRequestBodySize > 0 {
-		config.MaxRequestBodySize = *maxRequestBodySize
-	} else {
-		config.MaxRequestBodySize = fasthttp.DefaultMaxRequestBodySize
+	if len(*maxRequestBodySize) > 0 {
+		i, err := strconv.Atoi(*maxRequestBodySize)
+		if err != nil || i < 0 {
+			log.Fatalf("error: %v", fmt.Errorf("argument maxrequestbodysize error"))
+		}
+		config.MaxRequestBodySize = i
+	}
+	if len(*readTimeout) > 0 {
+		i, err := strconv.ParseInt(*readTimeout, 10, 64)
+		if err != nil || i < 0 {
+			log.Fatalf("error: %v", fmt.Errorf("argument readtimeout error"))
+		}
+		config.ReadTimeout = time.Duration(i)
+	}
+	if len(*writeTimeout) > 0 {
+		i, err := strconv.ParseInt(*writeTimeout, 10, 64)
+		if err != nil || i < 0 {
+			log.Fatalf("error: %v", fmt.Errorf("argument writetimeout error"))
+		}
+		config.WriteTimeout = time.Duration(i)
 	}
 
 	// safe warning
@@ -229,7 +250,12 @@ func main() {
 	if len(config.Addr) > 0 {
 		log.Println("Server address:", config.Addr)
 		go func() {
-			server := &fasthttp.Server{Handler: h, MaxRequestBodySize: config.MaxRequestBodySize}
+			server := &fasthttp.Server{
+				Handler:            h,
+				MaxRequestBodySize: config.MaxRequestBodySize,
+				ReadTimeout:        time.Duration(config.ReadTimeout),
+				WriteTimeout:       time.Duration(config.WriteTimeout),
+			}
 			if err := server.ListenAndServe(config.Addr); err != nil {
 				log.Fatalf("error in ListenAndServe: %s", err)
 			}
@@ -240,7 +266,12 @@ func main() {
 		log.Println("CertFile:", config.CertFile)
 		log.Println("KeyFile:", config.KeyFile)
 		go func() {
-			server := &fasthttp.Server{Handler: h, MaxRequestBodySize: config.MaxRequestBodySize}
+			server := &fasthttp.Server{
+				Handler:            h,
+				MaxRequestBodySize: config.MaxRequestBodySize,
+				ReadTimeout:        config.ReadTimeout,
+				WriteTimeout:       config.WriteTimeout,
+			}
 			if err := server.ListenAndServeTLS(config.AddrTLS, config.CertFile, config.KeyFile); err != nil {
 				log.Fatalf("error in ListenAndServeTLS: %s", err)
 			}
@@ -254,6 +285,8 @@ func main() {
 	log.Println("EnableColor:", config.EnableColor)
 	log.Println("EnableUpload:", config.EnableUpload)
 	log.Println("MaxRequestBodySize:", config.MaxRequestBodySize)
+	log.Println("ReadTimeout:", config.ReadTimeout)
+	log.Println("WriteTimeout:", config.WriteTimeout)
 	indexNamesLen := len(config.IndexNames)
 	if indexNamesLen > 0 {
 		log.Printf("Have %d index name(s):\n", indexNamesLen)
@@ -699,8 +732,11 @@ indexnames:
 verbose: true
 enablecolor: true
 enableupload: true
-## maxrequestbodysize:0 to default size
+## maxrequestbodysize 0 to default size
 maxrequestbodysize: %d
+## timeout 0s is no limit
+readtimeout: 0s
+writetimeout: 0s
 logfile: ./simplehttpserver.log
 #fallback: ./index.html
 #HTTP_PROXY:

@@ -81,9 +81,12 @@ Browse <https://localhost:8081>
     verbose: true
     enablecolor: true
     enableupload: true
-    ## maxrequestbodysize:0 to default size
-    #maxrequestbodysize: 4294967296
-    #logfile: ./simplehttpserver.log
+    ## maxrequestbodysize 0 to default size
+    maxrequestbodysize: 9223372036854775807
+    ## timeout 0s is no limit
+    readtimeout: 0s
+    writetimeout: 0s
+    logfile: ./simplehttpserver.log
     #fallback: ./index.html
     #HTTP_PROXY:
     #HTTPS_PROXY:
